@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{{TITLE}}</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin:0; padding:16px; color:#222 }
+    .container { max-width:900px; margin:0 auto; }
+    img.responsive { max-width:100%; height:auto; display:block; margin: 12px 0; }
+    .ad { margin:12px 0; text-align:center; }
+    .video-wrap { margin:12px 0; }
+    .download-btn { display:inline-block; padding:10px 14px; background:#1e88e5; color:#fff; border-radius:6px; text-decoration:none; margin-top:8px }
+    @media (max-width:600px) { body { padding:12px } }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>{{TITLE}}</h1>
+
+    <!-- Top Adsterra ad placeholder (do not change ad code identifiers) -->
+    <div class="ad">
+      <!-- ADSTERRA_TOP_BANNER -->
+    </div>
+
+    <div class="description">
+      {{DESCRIPTION}}
+    </div>
+
+    <!-- Main image -->
+    {% raw %}
+    <img class="responsive" src="{{IMAGE_URL}}" alt="{{TITLE}}" loading="eager" decoding="async">
+    {% endraw %}
+
+    <!-- Inline Ad -->
+    <div class="ad">
+      <!-- ADSTERRA_INLINE -->
+    </div>
+
+    <div class="video-wrap">
+      <!-- Video area (native player or iframe) -->
+      {{VIDEO_HTML}}
+    </div>
+
+    <!-- Download button if direct video available -->
+    <div class="actions">
+      {% raw %}
+      <!-- If VIDEO_URL is direct downloadable, show download button -->
+      {% endraw %}
+      <!-- DOWNLOAD_BUTTON_PLACEHOLDER -->
+    </div>
+
+    <div class="ad">
+      <!-- ADSTERRA_BOTTOM -->
+    </div>
+
+    <div style="margin-top:18px;font-size:12px;color:#666;">
+      Source: <a href="{{SOURCE_URL}}">{{SOURCE_URL}}</a>
+    </div>
+  </div>
+  <!-- Scripts kept minimal; Hls.js loaded only if needed by server-side template building -->
+</body>
+      </html>
