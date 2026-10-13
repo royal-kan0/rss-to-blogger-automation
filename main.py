@@ -446,7 +446,9 @@ class ContentScraper:
                     return urljoin(base_url, str(candidate))
 
         text = soup.get_text(" ", strip=True)
-        match = re.search(r"https?:\\?/\\?/[^\s\"'<>]+\.(mp4|webm|m4v|ogg|ogv|m3u8)(?:\?[^\s\"'<>]+)?", text, flags=re.I)
+        match = re.search(r"https?:\\?/\\?/[^
+\s\"'<>]+\.(mp4|webm|m4v|ogg|ogv|m3u8)(?:\?[^
+\s\"'<>]+)?", text, flags=re.I)
         if match:
             candidate = match.group(0)
             if self._is_valid_video(candidate):
@@ -463,7 +465,10 @@ class ContentScraper:
                 try:
                     data = json.loads(raw)
                     if isinstance(data, list):
-                        data = data[0]
+                        # prefer the first dict that looks like an Article/VideoObject
+                        for item in data:
+                            if isinstance(item, dict):
+                                return item
                     if isinstance(data, dict):
                         return data
                 except Exception:
@@ -537,25 +542,37 @@ class BrowserScraper:
             context = self.browser.new_context(java_script_enabled=True, user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36")
             page = context.new_page()
             page.set_default_navigation_timeout(self.timeout * 1000)
-            page.goto(url, wait_until="domcontentloaded")
-            time.sleep(2)
-            page.evaluate("window.scrollTo(0, document.body.scrollHeight * 0.3)")
-            time.sleep(1)
-            page.evaluate("window.scrollTo(0, document.body.scrollHeight * 0.7)")
-            time.sleep(1)
+            # Wait for network idle to allow dynamic content to load, but keep a controlled timeout
+            try:
+                page.goto(url, wait_until="networkidle")
+            except Exception:
+                page.goto(url, wait_until="domcontentloaded")
+
+            # short controlled waits + gentle scrolling to trigger lazy-load
+            time.sleep(1.2)
+            page.evaluate("window.scrollTo(0, document.body.scrollHeight * 0.25)")
+            time.sleep(0.8)
+            page.evaluate("window.scrollTo(0, document.body.scrollHeight * 0.6)")
+            time.sleep(0.9)
             page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-            time.sleep(1)
+            time.sleep(1.0)
 
             html = page.content()
             scraped = ContentScraper().extract_from_html(html, url)
 
-            # scan dynamically inserted elements
+            # scan dynamically inserted elements via JS
             try:
-                imgs = page.eval_on_selector_all("img", "els => els.map(el => ({src: el.src || el.getAttribute('data-src') || el.getAttribute('data-lazy-src') || el.getAttribute('data-original') || '', srcset: el.srcset || ''}))")
+                imgs = page.eval_on_selector_all(
+                    "img",
+                    "els => els.map(el => ({src: el.src || el.getAttribute('data-src') || el.getAttribute('data-lazy-src') || el.getAttribute('data-original') || el.getAttribute('data-srcset') || el.getAttribute('srcset') || '' , srcset: el.getAttribute('srcset') || ''}))"
+                )
             except Exception:
                 imgs = []
             try:
-                videos = page.eval_on_selector_all("video", "els => els.map(el => ({src: el.currentSrc || el.src || '', sources: Array.from(el.querySelectorAll('source')).map(s => s.src)}))")
+                videos = page.eval_on_selector_all(
+                    "video",
+                    "els => els.map(el => ({src: el.currentSrc || el.src || '', sources: Array.from(el.querySelectorAll('source')).map(s => s.src || '')}))"
+                )
             except Exception:
                 videos = []
             try:
@@ -802,18 +819,22 @@ html { scroll-behavior: smooth; }
             )
 
         if ".m3u8" in lower:
+            # HLS handling using hls.js (CDN). Use native playback on Safari/iOS if available.
+            escaped = json.dumps(video_url)
             return (
                 '<div id="hlsContainer" style="width:100%;"></div>'
                 '<script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>'
                 '<script>'
                 '(function(){'
                 'var video=document.createElement("video");video.controls=true;video.playsInline=true;video.style.width="100%";video.style.maxWidth="100%";video.style.height="auto";'
-                'var container=document.getElementById("hlsContainer");if(container){container.appendChild(video);}'
-                'if(window.Hls && Hls.isSupported()){var hls=new Hls();hls.loadSource(' + json.dumps(video_url) + ');hls.attachMedia(video);} else if(video.canPlayType("application/vnd.apple.mpegurl")){video.src=' + json.dumps(video_url) + ';}'
+                'var container=document.getElementById("hlsContainer");if(container){container.appendChild(video);} '
+                'if(window.Hls && Hls.isSupported()){var hls=new Hls();hls.loadSource(' + escaped + ');hls.attachMedia(video);} '
+                'else if(video.canPlayType("application/vnd.apple.mpegurl")){video.src=' + escaped + ';} '
                 '})();'
                 '</script>'
             )
 
+        # fallback -> iframe embed
         return (
             '<iframe src="' + BlogHTMLRenderer._safe_attr(video_url) + '" '
             'allowfullscreen="true" allow="autoplay; fullscreen; picture-in-picture" '
@@ -1166,7 +1187,10 @@ class RSSBloggerAutomation:
                     self.pending.push({"url": entry_url, "title": title_hint, "reason": "Rate limit hit", "first_seen": datetime.utcnow().isoformat()})
                     # Preserve remaining items in queue
                     for remaining in queue_candidates[idx:]:
-                        self.pending.push({"url": normalize_url(str(remaining.get("url") or "")), "title": str(remaining.get("title") or "").strip(), "reason": "Deferred due to rate limit", "first_seen": datetime.utcnow().isoformat()})
+                        try:
+                            self.pending.push({"url": normalize_url(str(remaining.get("url") or "")), "title": str(remaining.get("title") or "").strip(), "reason": "Deferred due to rate limit", "first_seen": datetime.utcnow().isoformat()})
+                        except Exception:
+                            continue
                     self.pending.save()
                     self.posted_urls.save()
                     self.browser_scraper.stop()
