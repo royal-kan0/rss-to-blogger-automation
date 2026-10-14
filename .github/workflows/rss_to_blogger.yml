@@ -1,4 +1,4 @@
-Name: RSS to Blogger Automation
+name: RSS to Blogger Automation
 
 on:
   schedule:
