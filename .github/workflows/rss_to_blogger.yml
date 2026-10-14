@@ -76,4 +76,5 @@ jobs:
           POSTS_PER_DAY_LIMIT: ${{ secrets.POSTS_PER_DAY_LIMIT || '50' }}
         run: |
           echo "🚀 Starting RSS to Blogger automation..."
-          python main.py
+          pytho
+          n main.py
