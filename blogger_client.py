@@ -1,10 +1,12 @@
 """
 Simple Blogger client using refresh token -> access token flow + REST API.
-Handles rate-limit detection and provides a publish_post(title, content_html) method.
+Handles rate-limit detection and provides publish_post(title, content_html).
 """
 import requests
 import logging
 from typing import Dict, Any
+from pathlib import Path
+import html as _html
 
 log = logging.getLogger("blogger_client")
 
@@ -34,62 +36,66 @@ class BloggerClient:
             raise Exception("TokenExchangeFailed")
         return r.json().get("access_token")
 
-    def build_post_html(self, title: str, description: str, image_url: str, video: str, source_url: str) -> str:
-        # Uses an external template file (template string inserted here)
-        # For brevity embed the responsive HTML template (you can keep it in templates/ as well)
-        from pathlib import Path
+    def build_post_html(self, title: str, description: str, content_html: str, image_url: str = None, video_html: str = None, source_url: str = None, ad_top: str = "", ad_inline: str = "") -> str:
         tpl_path = Path("templates/blogger_template.html")
         if tpl_path.exists():
             tpl = tpl_path.read_text(encoding="utf-8")
-            return tpl.replace("{{TITLE}}", self._escape(title)).replace("{{DESCRIPTION}}", description or "").replace("{{IMAGE_URL}}", image_url or "").replace("{{VIDEO_URL}}", video or "").replace("{{SOURCE_URL}}", source_url or "")
+            # placeholders in template: {{TITLE}}, {{DESCRIPTION}}, {{CONTENT}}, {{IMAGE_URL}}, {{VIDEO_HTML}}, {{SOURCE_URL}}, {{AD_TOP}}, {{AD_INLINE}}
+            return (tpl.replace("{{TITLE}}", self._escape(title))
+                       .replace("{{DESCRIPTION}}", description or "")
+                       .replace("{{CONTENT}}", content_html or "")
+                       .replace("{{IMAGE_URL}}", image_url or "")
+                       .replace("{{VIDEO_HTML}}", video_html or "")
+                       .replace("{{SOURCE_URL}}", source_url or "")
+                       .replace("{{AD_TOP}}", ad_top or "")
+                       .replace("{{AD_INLINE}}", ad_inline or ""))
         # fallback minimal HTML
-        html = f"""
-        <h1>{self._escape(title)}</h1>
-        <p>{description or ''}</p>
-        {'<img src="'+image_url+'" alt="'+self._escape(title)+'" style="max-width:100%;height:auto;" />' if image_url else ''}
-        <div>{self._video_embed_html(video)}</div>
-        <p><a href="{source_url}">Source</a></p>
-        """
-        return html
+        parts = []
+        parts.append(f'<h1>{self._escape(title)}</h1>')
+        if description:
+            parts.append(f'<p>{_html.escape(description)}</p>')
+        if image_url:
+            parts.append(f'<img src="{image_url}" alt="{self._escape(title)}" style="max-width:100%;height:auto;display:block;margin:15px auto;" loading="lazy" />')
+        if video_html:
+            parts.append(video_html)
+        if content_html:
+            parts.append(content_html)
+        if source_url:
+            parts.append(f'<p><a href="{source_url}">Source</a></p>')
+        return "\n".join(parts)
 
     def _escape(self, text: str) -> str:
-        import html
-        return html.escape(text or "")
+        return _html.escape(text or "")
 
     def _video_embed_html(self, video_url: str) -> str:
         if not video_url:
             return ""
         # direct file
         if any(ext in video_url for ext in [".mp4", ".webm", ".m4v", ".ogg"]):
-            # ensure quotes and & are handled in HTML
-            return f'<video controls playsinline preload="metadata" style="max-width:100%;height:auto;"><source src="{video_url}" type="video/mp4">Your browser does not support the video tag.</video>'
-        # HLS .m3u8 -> use simple video tag with hls.js fallback instruction (we keep simple embed)
+            mime = "video/mp4" if ".mp4" in video_url else "video/webm" if ".webm" in video_url else ""
+            return f'<video controls playsinline preload="metadata" style="max-width:100%;height:auto;"><source src="{video_url}" type="{mime}">Your browser does not support the video tag.</video>'
         if ".m3u8" in video_url:
-            # include a minimal HLS player embed using hls.js CDN (works on browsers supporting MSE)
             return (
-                f'<video id="player" controls playsinline preload="metadata" style="max-width:100%;height:auto;"></video>'
+                f'<div style="position:relative;padding-top:56.25%"><video id="player" controls playsinline preload="metadata" style="position:absolute;top:0;left:0;width:100%;height:100%;"></video></div>'
                 f'<script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>'
                 f'<script>'
-                f'if(Hls.isSupported()) {{'
+                f'if (window.Hls && Hls.isSupported()) {{'
                 f'  var hls = new Hls(); hls.loadSource("{video_url}"); hls.attachMedia(document.getElementById("player"));'
                 f'}} else if (document.getElementById("player").canPlayType("application/vnd.apple.mpegurl")) {{'
                 f'  document.getElementById("player").src = "{video_url}";'
                 f'}}'
                 f'</script>'
             )
-        # iframe providers (youtube,vimeo)
         if "youtube.com" in video_url or "youtu.be" in video_url:
-            # normalize to embed
+            vid = ""
             if "watch?v=" in video_url:
                 vid = video_url.split("v=")[-1].split("&")[0]
             elif "youtu.be/" in video_url:
                 vid = video_url.rsplit("/",1)[-1].split("?")[0]
-            else:
-                vid = ""
             if vid:
-                return f'<iframe src="https://www.youtube.com/embed/{vid}" width="100%" height="360" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>'
-        # fallback to raw iframe
-        return f'<iframe src="{video_url}" width="100%" height="360" frameborder="0" allowfullscreen></iframe>'
+                return f'<div style="position:relative;padding-top:56.25%"><iframe src="https://www.youtube.com/embed/{vid}" style="position:absolute;top:0;left:0;width:100%;height:100%;" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe></div>'
+        # fallback iframe
+        return f'<div style="position:relative;padding-top:56.25%"><iframe src="{video_url}" style="position:absolute;top:0;left:0;width:100%;height:100%;" frameborder="0" allowfullscreen></iframe></div>'
 
     def publish_post(self, title: str, content_html: str) -> Dict[str, Any]:
         token = self._get_access_token()
